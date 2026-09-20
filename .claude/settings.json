@@ -1,0 +1,29 @@
+{
+  "enabledPlugins": {
+    "gsap-scrolltrigger@claude-design-skillstack": true,
+    "motion-framer@claude-design-skillstack": true,
+    "frontend-design@claude-plugins-official": true,
+    "motion@claude-skills": true,
+    "mattpocock-skills@mattpocock": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-skills": {
+      "source": {
+        "source": "github",
+        "repo": "secondsky/claude-skills"
+      }
+    },
+    "claude-design-skillstack": {
+      "source": {
+        "source": "github",
+        "repo": "freshtechbro/claudedesignskills"
+      }
+    },
+    "mattpocock": {
+      "source": {
+        "source": "github",
+        "repo": "mattpocock/skills"
+      }
+    }
+  }
+}
