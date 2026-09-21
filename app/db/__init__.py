@@ -111,11 +111,11 @@ def get_appliance(pool, appliance_id):
 
 
 def get_recent_readings(pool, appliance_id, minutes, around):
-    """Readings within `minutes` (at most 60) either side of the time `around`, oldest first. Empty if none.
+    """Readings up to `minutes` (max 60) either side of `around`, oldest first. Empty list if none.
 
-    `around` is the Candidate's detected_at, so the answer doesn't depend on when triage happens to run.
+    Pass the Candidate's detected_at as `around`, so a late triage still sees the event.
     """
-    minutes = min(minutes, 60)  # the model picks this number; don't let it pull the whole table
+    minutes = min(minutes, 60)  # the model chooses this, so cap it
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(
             "SELECT watts, recorded_at::text AS recorded_at FROM reading "
@@ -128,8 +128,8 @@ def get_recent_readings(pool, appliance_id, minutes, around):
 
 
 def get_recent_decisions(pool, appliance_id, limit):
-    """The latest (at most 10) Triage Decisions for one Appliance, newest first. Empty list if none."""
-    limit = max(1, min(limit, 10))  # the model picks this number: Postgres errors on a negative LIMIT
+    """The last few (max 10) Triage Decisions for an Appliance, newest first."""
+    limit = max(1, min(limit, 10))  # model-chosen too, and Postgres errors on a negative LIMIT
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(
             "SELECT d.outcome, d.confidence, d.reasoning, d.gate_reason, c.trigger, c.watts, "

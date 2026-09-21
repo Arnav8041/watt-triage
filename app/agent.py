@@ -141,7 +141,7 @@ def decide(client, pool, candidate, trace):
                 except ValidationError:
                     raise AgentFailure("malformed submit_triage_decision call")
             step = {"tool": call.name, "input": call.input}
-            trace.append(step)  # recorded first, so a crashing tool still leaves its attempt behind
+            trace.append(step)  # log it first, so a crash still shows what was tried
             output = step["output"] = run_tool(pool, call.name, call.input, candidate["detected_at"])
             results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": json.dumps(output)}
@@ -190,7 +190,7 @@ def triage(pool, client, candidate_id):
             gate_reason += f" (agent failed: {failure})"
     confidence = recommendation.confidence if recommendation else None
     latency_ms = round((time.monotonic() - started) * 1000)
-    # Evidence = the Candidate plus what every look-up returned, so it stands alone once Readings are deleted (ADR-0004)
+    # the Candidate plus what the tools returned, so it outlives the raw Readings (ADR-0004)
     evidence = {**candidate, "tool_results": [step for step in trace if "output" in step]}
     db.insert_decision(
         pool, candidate_id, outcome, confidence, gate_reason, reasoning, evidence, trace, model(), latency_ms

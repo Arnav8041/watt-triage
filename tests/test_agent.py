@@ -176,7 +176,7 @@ def test_a_span_with_no_readings_gives_an_empty_result_not_an_error(client):
 
     _, trace = stored(cid)
     assert trace[0]["output"] == []
-    assert decisions_for(cid)[0][0] == "resolved"  # the run carried on to a real decision
+    assert decisions_for(cid)[0][0] == "resolved"  # and it carried on to decide
 
 
 def test_agent_can_look_up_what_was_concluded_last_time(client):
@@ -312,12 +312,12 @@ def test_a_tool_call_that_crashes_is_still_in_the_trace(client):
 
     evidence, trace = stored(cid)
     assert trace == [{"tool": "get_recent_readings", "input": {"appliance_id": "space_heater", "minutes": "ten"}}]
-    assert evidence["tool_results"] == []  # nothing came back, so nothing to snapshot
+    assert evidence["tool_results"] == []  # it never returned anything
     assert decisions_for(cid) == [("escalated", None, "agent failed: unexpected error (TypeError)", None)]
 
 
 def test_readings_are_centred_on_the_candidate_even_when_triage_runs_late(client):
-    cid = make_candidate()  # flagged "now"; the next lines move it 3 hours into the past
+    cid = make_candidate()  # then backdate it 3 hours
     with app.state.pool.connection() as conn:
         conn.execute("UPDATE anomaly_candidate SET detected_at = now() - interval '180 minutes' WHERE id = %s", (cid,))
         for watts, minutes_ago in [(1, 215), (2, 185), (3, 175), (4, 100)]:  # event is 180 min ago
