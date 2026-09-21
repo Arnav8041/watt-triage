@@ -27,8 +27,9 @@ Do not implement a UI surface using only one of these skills in isolation — de
 ## Secrets and `.env` — never print it
 
 `.env` holds real secrets (including `ANTHROPIC_API_KEY`). Never `cat`, `head`, `Read`, `sed` or otherwise
-display the file, and never echo a secret's value. To see which variables exist, list names only:
-`grep -o '^[A-Z_]*' .env`. Don't paste a connection string with its password into output either.
+display the file, and never echo a secret's value. To see which variables exist, list names only with
+`bash scripts/env-names.sh`. Do NOT run `grep ... .env` yourself: the `Read(./.env)` deny rule blocks any
+command that names the file, so it fails. Don't paste a connection string with its password into output either.
 
 ## Running things
 
