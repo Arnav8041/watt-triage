@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     if not url:
         raise RuntimeError("DATABASE_URL is not set")
     with ConnectionPool(url, open=True) as pool:
-        pool.wait()  # fail now if the database is unreachable, not on the first request
+        pool.wait()  # fail at startup if the database is down
         db.apply_schema(pool)
         app.state.pool = pool
         yield
@@ -27,14 +27,14 @@ app = FastAPI(lifespan=lifespan)
 
 @app.exception_handler(RequestValidationError)
 async def reject_bad_input(request: Request, exc: RequestValidationError):
-    # FastAPI's default 422 echoes the bad value back, which can't be encoded when it is inf/nan.
+    # The default 422 echoes the bad value back, and inf/nan can't be encoded.
     errors = [{"loc": e["loc"], "msg": e["msg"]} for e in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
 
 
 class ReadingIn(BaseModel):
     appliance_id: str
-    watts: float = Field(ge=0, allow_inf_nan=False)  # negative or infinite wattage: 422
+    watts: float = Field(ge=0, allow_inf_nan=False)  # negative or infinite: 422
 
 
 @app.get("/health")

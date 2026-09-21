@@ -23,3 +23,16 @@ Any frontend decision — writing or reviewing UI/component code, choosing typog
 These four plugins are installed at **project scope only** (declared in `.claude/settings.json`, not the user's global config) — they apply to Fleet Sentinel and are not carried into other projects.
 
 Do not implement a UI surface using only one of these skills in isolation — design (frontend-design), interaction motion (motion-framer / motion), and scroll motion (gsap-scrolltrigger) are meant to compose on every non-trivial frontend task.
+
+## Secrets and `.env` — never print it
+
+`.env` holds real secrets (including `ANTHROPIC_API_KEY`). Never `cat`, `head`, `Read`, `sed` or otherwise
+display the file, and never echo a secret's value. To see which variables exist, list names only:
+`grep -o '^[A-Z_]*' .env`. Don't paste a connection string with its password into output either.
+
+## Running things
+
+- Load env for one command without printing it: `set -a; . ./.env; set +a`.
+- Tests: `set -a; . ./.env; set +a; uv run pytest -q` (needs `TEST_DATABASE_URL`; local Postgres on 5432 must be up).
+- Typecheck: `uv run pyright app tests` (pyright is a dev dependency).
+- Ad-hoc scripts outside the repo need `PYTHONPATH=.` so `import app` works.
