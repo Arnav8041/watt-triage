@@ -2,6 +2,7 @@ import anthropic
 import httpx2
 import pytest
 
+from app import db
 from app.agent import triage
 from app.main import app
 from tests.fakes import ScriptedClient, submit, tool_use
@@ -150,6 +151,64 @@ def test_decision_stores_the_evidence_and_the_ordered_tool_trace(client):
     assert trace[0]["output"]["rated_watts"] == 1500
 
 
+def readings_call(minutes=10):
+    return [tool_use("get_recent_readings", appliance_id="space_heater", minutes=minutes)]
+
+
+def test_agent_can_look_at_the_recent_readings_oldest_first(client):
+    db.seed_readings(app.state.pool, "space_heater", [100, 110, 120])
+    cid = make_candidate()
+    fake = ScriptedClient(readings_call(), [submit("resolve_quietly", "certain")])
+
+    triage(app.state.pool, fake, cid)
+
+    _, trace = stored(cid)
+    assert [r["watts"] for r in trace[0]["output"]] == [100, 110, 120]
+
+
+def test_a_span_with_no_readings_gives_an_empty_result_not_an_error(client):
+    cid = make_candidate()
+    fake = ScriptedClient(readings_call(), [submit("resolve_quietly", "certain")])
+
+    triage(app.state.pool, fake, cid)
+
+    _, trace = stored(cid)
+    assert trace[0]["output"] == []
+    assert decisions_for(cid)[0][0] == "resolved"  # the run carried on to a real decision
+
+
+def test_agent_can_look_up_what_was_concluded_last_time(client):
+    earlier = make_candidate()
+    triage(app.state.pool, ScriptedClient(profile_call(), [submit("resolve_quietly", "certain", "Normal cycling.")]), earlier)
+    now = make_candidate()
+    ask = [tool_use("get_recent_decisions", appliance_id="space_heater", limit=5)]
+
+    triage(app.state.pool, ScriptedClient(ask, [submit("resolve_quietly", "certain")]), now)
+
+    _, trace = stored(now)
+    (precedent,) = trace[0]["output"]
+    assert (precedent["outcome"], precedent["confidence"], precedent["reasoning"]) == (
+        "resolved", "certain", "Normal cycling."
+    )
+
+
+def test_evidence_snapshots_what_the_tools_returned_and_the_trace_keeps_their_order(client):
+    db.seed_readings(app.state.pool, "space_heater", [100, 110, 120])
+    cid = make_candidate()
+    history = [tool_use("get_recent_decisions", appliance_id="space_heater", limit=5)]
+    fake = ScriptedClient(readings_call(), history, [submit("resolve_quietly", "certain")])
+
+    triage(app.state.pool, fake, cid)
+
+    evidence, trace = stored(cid)
+    assert [step["tool"] for step in trace] == [
+        "get_recent_readings", "get_recent_decisions", "submit_triage_decision"
+    ]
+    assert [seen["tool"] for seen in evidence["tool_results"]] == ["get_recent_readings", "get_recent_decisions"]
+    assert [r["watts"] for r in evidence["tool_results"][0]["output"]] == [100, 110, 120]
+    assert evidence["watts"] == 600  # the Candidate itself is still in there
+
+
 def test_trace_is_kept_when_the_run_fails_part_way(client, monkeypatch):
     monkeypatch.setenv("AGENT_MAX_TURNS", "1")  # one look-up, then the cap hits
     cid = make_candidate()
@@ -196,3 +255,37 @@ def test_agent_is_told_a_breach_will_be_escalated_so_its_prose_fits(client):
 
     assert "will be escalated" in fakes[0].calls[0]["system"]
     assert "will be escalated" not in fakes[1].calls[0]["system"]
+
+
+def test_a_huge_span_is_capped_at_an_hour(client):
+    db.seed_readings(app.state.pool, "space_heater", [1, 2, 3], interval_seconds=40 * 60)  # 120, 80, 40 min ago
+
+    readings = db.get_recent_readings(app.state.pool, "space_heater", 1_000_000)
+
+    assert [r["watts"] for r in readings] == [3]
+
+
+def test_recent_decisions_come_newest_first_and_are_capped_at_ten(client):
+    for i in range(1, 12):
+        script = ScriptedClient(profile_call(), [submit("escalate", "certain", f"decision {i}")])
+        triage(app.state.pool, script, make_candidate())
+
+    decisions = db.get_recent_decisions(app.state.pool, "space_heater", 1_000_000)
+
+    assert [d["reasoning"] for d in decisions] == [f"decision {i}" for i in range(11, 1, -1)]
+
+
+def test_the_agent_is_offered_exactly_the_read_only_tools_and_the_terminal_one(client):
+    fake = ScriptedClient(profile_call(), [submit("resolve_quietly", "certain")])
+
+    triage(app.state.pool, fake, make_candidate())
+
+    offered = {tool["name"] for tool in fake.calls[0]["tools"]}
+    assert offered == {
+        "get_appliance_profile", "get_recent_readings", "get_recent_decisions", "submit_triage_decision"
+    }
+
+
+def test_no_decisions_or_a_nonsense_limit_gives_an_empty_result_not_an_error(client):
+    assert db.get_recent_decisions(app.state.pool, "space_heater", 5) == []
+    assert db.get_recent_decisions(app.state.pool, "space_heater", -1) == []

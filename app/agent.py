@@ -14,7 +14,9 @@ from app import db, gate
 
 SYSTEM = (
     "You triage one suspicious power reading in a home. Use get_appliance_profile to find out what "
-    "the appliance is and its rated wattage, then call submit_triage_decision exactly once. "
+    "the appliance is and its rated wattage. If it would help, use get_recent_readings to see the shape "
+    "of the trace around the reading, and get_recent_decisions to see what was concluded last time. "
+    "Only look up what you need. Then call submit_triage_decision exactly once. "
     "Write the reasoning in plain language for the homeowner. Say 'certain' only if the reading is "
     "clearly harmless; if you are at all unsure, say 'unsure' and escalate."
 )
@@ -52,6 +54,30 @@ TOOLS = [
         },
     },
     {
+        "name": "get_recent_readings",
+        "description": "The appliance's power readings over the last N minutes, oldest first. Shows "
+        "whether the reading was a sudden step or a gradual climb, and whether it held or bounced back.",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {"appliance_id": {"type": "string"}, "minutes": {"type": "integer"}},
+            "required": ["appliance_id", "minutes"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_recent_decisions",
+        "description": "What was concluded the last few times this appliance was triaged (outcome, "
+        "confidence, reasoning), newest first. Use it to see whether similar behaviour was benign before.",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {"appliance_id": {"type": "string"}, "limit": {"type": "integer"}},
+            "required": ["appliance_id", "limit"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "submit_triage_decision",
         "description": "Your final answer. Ends the investigation.",
         "strict": True,
@@ -75,6 +101,10 @@ def max_turns():
 def run_tool(pool, name, args):
     if name == "get_appliance_profile":
         return db.get_appliance(pool, args["appliance_id"]) or {"error": "no such appliance"}
+    if name == "get_recent_readings":
+        return db.get_recent_readings(pool, args["appliance_id"], args["minutes"])
+    if name == "get_recent_decisions":
+        return db.get_recent_decisions(pool, args["appliance_id"], args["limit"])
     return {"error": f"unknown tool {name}"}
 
 
@@ -153,6 +183,8 @@ def triage(pool, client, candidate_id):
             gate_reason += f" (agent failed: {failure})"
     confidence = recommendation.confidence if recommendation else None
     latency_ms = round((time.monotonic() - started) * 1000)
+    # Evidence = the Candidate plus what every look-up returned, so it stands alone once Readings are deleted (ADR-0004)
+    evidence = {**candidate, "tool_results": [step for step in trace if "output" in step]}
     db.insert_decision(
-        pool, candidate_id, outcome, confidence, gate_reason, reasoning, candidate, trace, model(), latency_ms
+        pool, candidate_id, outcome, confidence, gate_reason, reasoning, evidence, trace, model(), latency_ms
     )
