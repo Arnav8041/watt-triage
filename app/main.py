@@ -1,13 +1,14 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+import anthropic
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
-from app import db
+from app import agent, db
 
 
 @asynccontextmanager
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
         pool.wait()  # fail at startup if the database is down
         db.apply_schema(pool)
         app.state.pool = pool
+        app.state.client = anthropic.Anthropic(max_retries=0)  # no retries: a slow model escalates instead
         yield
 
 
@@ -43,8 +45,11 @@ def health():
 
 
 @app.post("/readings", status_code=202)
-def post_reading(reading: ReadingIn, request: Request):
-    reading_id = db.insert_reading(request.app.state.pool, reading.appliance_id, reading.watts)
-    if reading_id is None:
+def post_reading(reading: ReadingIn, request: Request, background_tasks: BackgroundTasks):
+    stored = db.insert_reading(request.app.state.pool, reading.appliance_id, reading.watts)
+    if stored is None:
         raise HTTPException(422, f"Unknown appliance '{reading.appliance_id}'")
+    reading_id, candidate_ids = stored
+    for candidate_id in candidate_ids:  # runs after the 202 has gone out
+        background_tasks.add_task(agent.triage, request.app.state.pool, request.app.state.client, candidate_id)
     return {"id": reading_id}

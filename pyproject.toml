@@ -6,6 +6,7 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "psycopg[binary,pool]",
+    "anthropic>=1.7.0",
 ]
 
 [dependency-groups]

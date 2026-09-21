@@ -1,7 +1,16 @@
+import os
+import threading
+import time
+
+import httpx2
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
 
+from app import agent
+from app.agent import triage as real_triage
 from app.main import app
+from tests.fakes import ScriptedClient, submit, tool_use
 
 RATED_WATTS = {
     "fridge": 250,
@@ -85,3 +94,70 @@ def test_missing_database_url_fails_at_startup(monkeypatch):
     with pytest.raises(RuntimeError, match="DATABASE_URL"):
         with TestClient(app):
             pass
+
+
+def test_breach_reading_is_investigated_and_escalated_end_to_end(client, monkeypatch):
+    monkeypatch.setattr(agent, "triage", real_triage)  # the client fixture switches it off
+    # The fake model is confidently wrong: it says "resolve quietly, certain" about a Rated Breach.
+    app.state.client = ScriptedClient(
+        [tool_use("get_appliance_profile", appliance_id="space_heater")],
+        [submit("resolve_quietly", "certain", "Just warming up.")],
+    )
+
+    r = client.post("/readings", json={"appliance_id": "space_heater", "watts": 3180})
+
+    assert r.status_code == 202
+    assert query("SELECT outcome, reasoning FROM triage_decision") == [("escalated", "Just warming up.")]
+    assert query("SELECT status FROM anomaly_candidate") == [("decided",)]
+
+
+class FrozenClient(ScriptedClient):
+    """A model that hangs on its first call until the test lets it go."""
+
+    def __init__(self, *replies):
+        super().__init__(*replies)
+        self.asked = threading.Event()
+        self.release = threading.Event()
+
+    def create(self, **kwargs):
+        self.asked.set()
+        self.release.wait(timeout=10)
+        return super().create(**kwargs)
+
+
+def test_ingest_responds_without_waiting_for_the_model(monkeypatch):
+    # TestClient waits for background work, so this needs a real server on a real port.
+    monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
+    server = uvicorn.Server(uvicorn.Config(app, port=0, log_level="warning"))
+    thread = threading.Thread(target=server.run)
+    thread.start()
+    frozen = FrozenClient(
+        [tool_use("get_appliance_profile", appliance_id="space_heater")],
+        [submit("resolve_quietly", "certain")],
+    )
+    try:
+        while not server.started:
+            time.sleep(0.05)
+        with app.state.pool.connection() as conn:
+            conn.execute("TRUNCATE reading, anomaly_candidate CASCADE")
+        app.state.client = frozen
+        port = server.servers[0].sockets[0].getsockname()[1]
+
+        # If ingest waited for the frozen model, this would time out after 3 seconds.
+        r = httpx2.post(
+            f"http://127.0.0.1:{port}/readings", json={"appliance_id": "space_heater", "watts": 3180}, timeout=3
+        )
+
+        assert r.status_code == 202
+        assert frozen.asked.wait(timeout=3)  # the agent did start, and is stuck on the model
+        assert query("SELECT * FROM triage_decision") == []  # ...so there is no decision yet
+        frozen.release.set()
+        for _ in range(100):  # the decision appears once the model answers
+            if query("SELECT outcome FROM triage_decision"):
+                break
+            time.sleep(0.05)
+        assert query("SELECT outcome FROM triage_decision") == [("escalated",)]
+    finally:
+        frozen.release.set()
+        server.should_exit = True
+        thread.join()
