@@ -11,8 +11,12 @@ def headroom_fraction():
     return float(os.environ.get("GATE_HEADROOM_FRACTION", 0.8))  # how close to the limit is too close
 
 
-def decide(candidate, recommendation, rated_watts):
-    """Returns (outcome, gate_reason)."""
+def cooldown_hours():
+    return float(os.environ.get("GATE_COOLDOWN_HOURS", 24))  # hours an unacknowledged Escalation blocks quiet resolution
+
+
+def decide(candidate, recommendation, rated_watts, cooldown_active):
+    """Returns (outcome, gate_reason). cooldown_active: a recent unacknowledged Escalation on this Appliance."""
     if candidate["trigger"] == "rated_breach":  # decided before the agent is consulted (ADR-0001)
         return "escalated", "rated breach: reading is above the appliance's rated wattage"
     if recommendation.outcome == "escalate":
@@ -27,4 +31,6 @@ def decide(candidate, recommendation, rated_watts):
         return "escalated", (
             f"{candidate['watts']:g}W is at or above {headroom_fraction():.0%} of the {rated_watts}W rated wattage"
         )
+    if cooldown_active:  # unacknowledged only (ADR-0007)
+        return "escalated", f"unacknowledged escalation on this appliance within the last {cooldown_hours():g}h"
     return "resolved", "all checks passed"

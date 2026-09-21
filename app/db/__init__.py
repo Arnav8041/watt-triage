@@ -140,6 +140,35 @@ def get_recent_decisions(pool, appliance_id, limit):
         ).fetchall()
 
 
+def has_unacknowledged_escalation(pool, appliance_id, within_hours):
+    """True if this Appliance has an unacknowledged Escalation from the last `within_hours`."""
+    with pool.connection() as conn:
+        return conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM triage_decision d JOIN anomaly_candidate c ON c.id = d.candidate_id "
+            "WHERE c.appliance_id = %s AND d.outcome = 'escalated' AND d.acknowledged_at IS NULL "
+            "AND d.decided_at > now() - %s * interval '1 hour')",
+            (appliance_id, within_hours),
+        ).fetchone()[0]
+
+
+def acknowledge_decision(pool, decision_id):
+    """Mark an Escalation acknowledged. Returns (outcome, acknowledged_at), or None if there's no such decision.
+
+    A second call keeps the first time. A Quiet Resolution is left alone.
+    """
+    with pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE triage_decision SET acknowledged_at = COALESCE(acknowledged_at, now()) "
+            "WHERE id = %s AND outcome = 'escalated' RETURNING outcome, acknowledged_at",
+            (decision_id,),
+        ).fetchone()
+        if row:
+            return row
+        return conn.execute(  # not updated: missing, or not an Escalation
+            "SELECT outcome, acknowledged_at FROM triage_decision WHERE id = %s", (decision_id,)
+        ).fetchone()
+
+
 def insert_decision(pool, candidate_id, outcome, confidence, gate_reason, reasoning, evidence, tool_trace, model, latency_ms):
     """Save the Triage Decision and mark the Candidate decided, in one transaction."""
     with pool.connection() as conn:

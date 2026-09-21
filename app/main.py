@@ -53,3 +53,14 @@ def post_reading(reading: ReadingIn, request: Request, background_tasks: Backgro
     for candidate_id in candidate_ids:  # runs after the 202 has gone out
         background_tasks.add_task(agent.triage, request.app.state.pool, request.app.state.client, candidate_id)
     return {"id": reading_id}
+
+
+@app.post("/decisions/{decision_id}/acknowledge")
+def acknowledge(decision_id: int, request: Request):
+    found = db.acknowledge_decision(request.app.state.pool, decision_id)
+    if found is None:
+        raise HTTPException(404, f"No decision {decision_id}")
+    outcome, acknowledged_at = found
+    if outcome != "escalated":
+        raise HTTPException(409, "Only an Escalation can be acknowledged, not a Quiet Resolution")
+    return {"id": decision_id, "acknowledged_at": acknowledged_at}

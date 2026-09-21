@@ -185,7 +185,8 @@ def triage(pool, client, candidate_id):
         outcome, gate_reason = "escalated", f"agent failed: {failure}"
     else:  # a breach keeps its own reason even if the agent failed
         rated_watts = db.get_appliance(pool, candidate["appliance_id"])["rated_watts"]
-        outcome, gate_reason = gate.decide(candidate, recommendation, rated_watts)
+        cooldown_active = db.has_unacknowledged_escalation(pool, candidate["appliance_id"], gate.cooldown_hours())
+        outcome, gate_reason = gate.decide(candidate, recommendation, rated_watts, cooldown_active)
         if failure:
             gate_reason += f" (agent failed: {failure})"
     confidence = recommendation.confidence if recommendation else None

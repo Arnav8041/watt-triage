@@ -44,6 +44,11 @@ A Triage Decision that puts the situation in front of the homeowner. The default
 whenever anything is uncertain.
 _Avoid_: Alert, alarm, notification, warning
 
+**Acknowledgement**:
+The homeowner marking an Escalation as dealt with. It only stamps a time on the decision,
+never edits it, and it lifts the cooldown veto for that Escalation.
+_Avoid_: Dismiss, resolve, close
+
 **Quiet Resolution**:
 A Triage Decision that closes an Anomaly Candidate without involving the homeowner. Still
 fully recorded — quiet means unnotified, never unlogged.
