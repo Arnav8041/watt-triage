@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import anthropic
 import httpx2
 import pytest
@@ -260,7 +262,7 @@ def test_agent_is_told_a_breach_will_be_escalated_so_its_prose_fits(client):
 def test_a_huge_span_is_capped_at_an_hour(client):
     db.seed_readings(app.state.pool, "space_heater", [1, 2, 3], interval_seconds=40 * 60)  # 120, 80, 40 min ago
 
-    readings = db.get_recent_readings(app.state.pool, "space_heater", 1_000_000)
+    readings = db.get_recent_readings(app.state.pool, "space_heater", 1_000_000, datetime.now(timezone.utc))
 
     assert [r["watts"] for r in readings] == [3]
 
@@ -289,3 +291,58 @@ def test_the_agent_is_offered_exactly_the_read_only_tools_and_the_terminal_one(c
 def test_no_decisions_or_a_nonsense_limit_gives_an_empty_result_not_an_error(client):
     assert db.get_recent_decisions(app.state.pool, "space_heater", 5) == []
     assert db.get_recent_decisions(app.state.pool, "space_heater", -1) == []
+
+
+@pytest.mark.parametrize("tool, arg", [("get_recent_readings", {"minutes": 10}), ("get_recent_decisions", {"limit": 5})])
+def test_asking_about_an_unknown_appliance_gets_an_error_the_agent_can_read(client, tool, arg):
+    cid = make_candidate()
+    fake = ScriptedClient([tool_use(tool, appliance_id="toaster", **arg)], [submit("escalate", "unsure")])
+
+    triage(app.state.pool, fake, cid)
+
+    _, trace = stored(cid)
+    assert trace[0]["output"] == {"error": "no such appliance"}
+
+
+def test_a_tool_call_that_crashes_is_still_in_the_trace(client):
+    cid = make_candidate()
+    bad_call = [tool_use("get_recent_readings", appliance_id="space_heater", minutes="ten")]
+
+    triage(app.state.pool, ScriptedClient(bad_call), cid)
+
+    evidence, trace = stored(cid)
+    assert trace == [{"tool": "get_recent_readings", "input": {"appliance_id": "space_heater", "minutes": "ten"}}]
+    assert evidence["tool_results"] == []  # nothing came back, so nothing to snapshot
+    assert decisions_for(cid) == [("escalated", None, "agent failed: unexpected error (TypeError)", None)]
+
+
+def test_readings_are_centred_on_the_candidate_even_when_triage_runs_late(client):
+    cid = make_candidate()  # flagged "now"; the next lines move it 3 hours into the past
+    with app.state.pool.connection() as conn:
+        conn.execute("UPDATE anomaly_candidate SET detected_at = now() - interval '180 minutes' WHERE id = %s", (cid,))
+        for watts, minutes_ago in [(1, 215), (2, 185), (3, 175), (4, 100)]:  # event is 180 min ago
+            conn.execute(
+                "INSERT INTO reading (appliance_id, watts, recorded_at) "
+                "VALUES ('space_heater', %s, now() - make_interval(mins => %s))",
+                (watts, minutes_ago),
+            )
+    fake = ScriptedClient(readings_call(minutes=10), [submit("escalate", "unsure")])
+
+    triage(app.state.pool, fake, cid)
+
+    _, trace = stored(cid)
+    assert [r["watts"] for r in trace[0]["output"]] == [2, 3]  # 5 min before and 5 min after the event
+
+
+def test_precedent_shows_when_the_gate_rather_than_the_agent_forced_the_outcome(client):
+    breach = make_candidate(trigger="rated_breach", watts=3180, baseline_size=0)
+    triage(app.state.pool, ScriptedClient(profile_call(), [submit("resolve_quietly", "certain", "Just warming up.")]), breach)
+    now = make_candidate()
+    ask = [tool_use("get_recent_decisions", appliance_id="space_heater", limit=5)]
+
+    triage(app.state.pool, ScriptedClient(ask, [submit("escalate", "unsure")]), now)
+
+    _, trace = stored(now)
+    (precedent,) = trace[0]["output"]
+    assert precedent["trigger"] == "rated_breach"
+    assert precedent["gate_reason"] == "rated breach: reading is above the appliance's rated wattage"

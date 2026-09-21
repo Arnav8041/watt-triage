@@ -110,15 +110,20 @@ def get_appliance(pool, appliance_id):
         ).fetchone()
 
 
-def get_recent_readings(pool, appliance_id, minutes):
-    """The last `minutes` (at most 60) of Readings for one Appliance, oldest first. Empty list if none."""
+def get_recent_readings(pool, appliance_id, minutes, around):
+    """Readings within `minutes` (at most 60) either side of the time `around`, oldest first. Empty if none.
+
+    `around` is the Candidate's detected_at, so the answer doesn't depend on when triage happens to run.
+    """
     minutes = min(minutes, 60)  # the model picks this number; don't let it pull the whole table
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(
             "SELECT watts, recorded_at::text AS recorded_at FROM reading "
-            "WHERE appliance_id = %s AND recorded_at > now() - make_interval(mins => %s) "
+            "WHERE appliance_id = %s "
+            "AND recorded_at BETWEEN %s::timestamptz - make_interval(mins => %s) "
+            "AND %s::timestamptz + make_interval(mins => %s) "
             "ORDER BY recorded_at, id",
-            (appliance_id, minutes),
+            (appliance_id, around, minutes, around, minutes),
         ).fetchall()
 
 
@@ -127,7 +132,8 @@ def get_recent_decisions(pool, appliance_id, limit):
     limit = max(1, min(limit, 10))  # the model picks this number: Postgres errors on a negative LIMIT
     with pool.connection() as conn:
         return conn.cursor(row_factory=dict_row).execute(
-            "SELECT d.outcome, d.confidence, d.reasoning, c.watts, d.decided_at::text AS decided_at "
+            "SELECT d.outcome, d.confidence, d.reasoning, d.gate_reason, c.trigger, c.watts, "
+            "d.decided_at::text AS decided_at "
             "FROM triage_decision d JOIN anomaly_candidate c ON c.id = d.candidate_id "
             "WHERE c.appliance_id = %s ORDER BY d.decided_at DESC, d.id DESC LIMIT %s",
             (appliance_id, limit),

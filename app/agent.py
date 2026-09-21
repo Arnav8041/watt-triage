@@ -55,8 +55,9 @@ TOOLS = [
     },
     {
         "name": "get_recent_readings",
-        "description": "The appliance's power readings over the last N minutes, oldest first. Shows "
-        "whether the reading was a sudden step or a gradual climb, and whether it held or bounced back.",
+        "description": "The appliance's power readings from N minutes before to N minutes after the "
+        "flagged reading (at most 60), oldest first. Shows whether it was a sudden step or a gradual "
+        "climb, and whether it held or bounced back.",
         "strict": True,
         "input_schema": {
             "type": "object",
@@ -67,8 +68,10 @@ TOOLS = [
     },
     {
         "name": "get_recent_decisions",
-        "description": "What was concluded the last few times this appliance was triaged (outcome, "
-        "confidence, reasoning), newest first. Use it to see whether similar behaviour was benign before.",
+        "description": "What was concluded the last few times this appliance was triaged (at most 10), "
+        "newest first. outcome is 'escalated' or 'resolved' (closed quietly, same as resolve_quietly). "
+        "A rated_breach trigger or a gate_reason means the gate, not the earlier reasoning, decided it. "
+        "Use it to see whether similar behaviour was benign before.",
         "strict": True,
         "input_schema": {
             "type": "object",
@@ -98,14 +101,17 @@ def max_turns():
     return int(os.environ.get("AGENT_MAX_TURNS", 6))  # model replies before giving up
 
 
-def run_tool(pool, name, args):
+def run_tool(pool, name, args, detected_at):
+    if name not in ("get_appliance_profile", "get_recent_readings", "get_recent_decisions"):
+        return {"error": f"unknown tool {name}"}
+    appliance = db.get_appliance(pool, args["appliance_id"])
+    if appliance is None:  # a typo'd id must not look like "no history"
+        return {"error": "no such appliance"}
     if name == "get_appliance_profile":
-        return db.get_appliance(pool, args["appliance_id"]) or {"error": "no such appliance"}
+        return appliance
     if name == "get_recent_readings":
-        return db.get_recent_readings(pool, args["appliance_id"], args["minutes"])
-    if name == "get_recent_decisions":
-        return db.get_recent_decisions(pool, args["appliance_id"], args["limit"])
-    return {"error": f"unknown tool {name}"}
+        return db.get_recent_readings(pool, appliance["id"], args["minutes"], detected_at)
+    return db.get_recent_decisions(pool, appliance["id"], args["limit"])
 
 
 def decide(client, pool, candidate, trace):
@@ -134,8 +140,9 @@ def decide(client, pool, candidate, trace):
                     return Recommendation(**call.input)
                 except ValidationError:
                     raise AgentFailure("malformed submit_triage_decision call")
-            output = run_tool(pool, call.name, call.input)
-            trace.append({"tool": call.name, "input": call.input, "output": output})
+            step = {"tool": call.name, "input": call.input}
+            trace.append(step)  # recorded first, so a crashing tool still leaves its attempt behind
+            output = step["output"] = run_tool(pool, call.name, call.input, candidate["detected_at"])
             results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": json.dumps(output)}
             )
