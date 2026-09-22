@@ -1,15 +1,22 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Space_Grotesk, Martian_Mono, Source_Serif_4 } from "next/font/google";
+import { MotionConfig } from "motion/react";
 import "./globals.css";
 
-const plexSans = IBM_Plex_Sans({
+const sans = Space_Grotesk({
   variable: "--font-sans",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "700"],
 });
 
-const plexMono = IBM_Plex_Mono({
+const mono = Martian_Mono({
   variable: "--font-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+});
+
+const serif = Source_Serif_4({
+  variable: "--font-serif",
   subsets: ["latin"],
   weight: ["400", "500"],
 });
@@ -21,8 +28,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${plexSans.variable} ${plexMono.variable} h-full`}>
-      <body className="min-h-full">{children}</body>
+    <html lang="en" className={`${sans.variable} ${mono.variable} ${serif.variable} h-full`}>
+      {/* suppressHydrationWarning: some browser extensions (e.g. ColorZilla's
+          cz-shortcut-listen) write an attribute onto <body> before React hydrates.
+          React can't tell that apart from a real mismatch, so it's silenced here. */}
+      <body className="min-h-full" suppressHydrationWarning>
+        {/* every whileHover/animate value in the app respects the OS's reduced-motion
+            setting from here, once, instead of each component checking it separately */}
+        <MotionConfig reducedMotion="user">{children}</MotionConfig>
+      </body>
     </html>
   );
 }

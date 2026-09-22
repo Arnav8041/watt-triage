@@ -120,6 +120,17 @@ def fire_scenario(scenario: str, request: Request, background_tasks: BackgroundT
     return {"scenario": scenario}
 
 
+@app.post("/admin/reset")
+def reset_demo(request: Request):
+    """Demo control (not a general write API): wipe the log a career-fair visitor left behind
+    and replant baseline history, so the rack isn't empty while ambient traffic catches back up.
+    """
+    db.reset(request.app.state.pool)
+    simulator.seed(request.app.state.pool)
+    request.app.state.fire_cooldown_until = 0.0
+    return {"status": "reset"}
+
+
 @app.post("/admin/rollup")
 def rollup(request: Request):
     # No scheduler in v1 (ADR-0006): call this by hand, or from cron.

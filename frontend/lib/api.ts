@@ -48,4 +48,8 @@ export function fireScenario(scenario: Scenario) {
   return post<{ scenario: string }>(`/admin/fire/${scenario}`);
 }
 
+export function resetDemo() {
+  return post<{ status: string }>("/admin/reset");
+}
+
 export { ApiError };

@@ -1,25 +1,30 @@
 @import "tailwindcss";
 
 /*
-  Palette: a utility control panel, not a SaaS dashboard. Amber and teal are the two
-  colors real breaker panels and gauges already use for "near the limit" and "safe" —
-  borrowed on purpose, not invented.
+  One consistent dark instrument theme across the whole site — landing page and
+  dashboard share the same background family. The "live signal vs. written record"
+  distinction that used to be a jarring light/dark seam is now carried by type alone:
+  mono for measured data, serif for the agent's own written reasoning. Status colors
+  are shared everywhere so "hot" and "escalated" mean the same hue throughout, with
+  brighter --*-glow variants reserved for CRT-style bloom on the live numbers.
 */
 :root {
-  --bg: #0f1417;
-  --surface: #171d21;
-  --surface-raised: #1d2429;
-  --line: #2a3238;
-  --ink: #e8edee;
-  --ink-dim: #8b979c;
-  --danger: #e8a33d;
-  --danger-dim: #6b5326;
-  --warn: #d9c44a;
-  --warn-dim: #565023;
-  --safe: #4fa381;
-  --safe-dim: #294538;
-  --pending: #6e8fb5;
-  --pending-dim: #2d3a48;
+  --bg: #0a0e0b;
+  --surface: #12170f;
+  --surface-raised: #1a2117;
+  --line: #232b23;
+  --ink: #eef3ec;
+  --ink-dim: #8a988a;
+
+  --safe: #2e9e63;
+  --hot: #b8791f;
+  --breach: #c1402c;
+  --pending: #3d72ad;
+
+  --safe-glow: #7dffc0;
+  --hot-glow: #ffd166;
+  --breach-glow: #ff7a5c;
+  --pending-glow: #8fc4ff;
 }
 
 @theme inline {
@@ -29,16 +34,15 @@
   --color-line: var(--line);
   --color-ink: var(--ink);
   --color-ink-dim: var(--ink-dim);
-  --color-danger: var(--danger);
-  --color-danger-dim: var(--danger-dim);
-  --color-warn: var(--warn);
-  --color-warn-dim: var(--warn-dim);
+
   --color-safe: var(--safe);
-  --color-safe-dim: var(--safe-dim);
+  --color-hot: var(--hot);
+  --color-breach: var(--breach);
   --color-pending: var(--pending);
-  --color-pending-dim: var(--pending-dim);
+
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
 }
 
 body {
@@ -47,10 +51,25 @@ body {
   font-family: var(--font-sans);
 }
 
-/* readouts are measured, not written — mono says so without a label */
+/* measured data — wattages, timestamps, ids — always in mono with tabular figures */
 .tnum {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* the agent's written reasoning reads as prose, not as a UI label */
+.prose-log {
+  font-family: var(--font-serif);
+  line-height: 1.6;
+  max-width: 62ch;
+}
+
+/* the one bold move: a hot/breaching reading literally glows, like a lit dial */
+.glow-hot {
+  text-shadow: 0 0 12px var(--hot-glow);
+}
+.glow-breach {
+  text-shadow: 0 0 14px var(--breach-glow);
 }
 
 @media (prefers-reduced-motion: reduce) {

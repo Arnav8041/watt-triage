@@ -48,7 +48,7 @@ export function ToolTrace({ trace, scrollerRef }: { trace: ToolCall[]; scrollerR
   return (
     <ol ref={containerRef} className="flex flex-col gap-2">
       {trace.map((step, i) => (
-        <li key={i} data-trace-step className="rounded border border-line bg-surface-raised px-3 py-2">
+        <li key={i} data-trace-step className="rounded border border-line bg-surface px-3 py-2">
           <div className="tnum text-sm text-ink">
             {i + 1}. {step.tool}
           </div>

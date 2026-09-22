@@ -17,7 +17,7 @@ export function DecisionFeed({ decisions, onAcknowledged }: { decisions: Decisio
   }
 
   return (
-    <div ref={scrollerRef} className="flex max-h-[420px] flex-col gap-2 overflow-y-auto pr-1">
+    <div ref={scrollerRef} className="flex max-h-[520px] flex-col overflow-y-auto pr-1">
       <AnimatePresence initial={false}>
         {decisions.map((decision) => (
           <DecisionRow

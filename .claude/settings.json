@@ -1,4 +1,16 @@
 {
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(cat *.env*)",
+      "Bash(head *.env*)",
+      "Bash(tail *.env*)",
+      "Bash(less *.env*)",
+      "Bash(sed *.env*)",
+      "Bash(awk *.env*)"
+    ]
+  },
   "enabledPlugins": {
     "gsap-scrolltrigger@claude-design-skillstack": true,
     "motion-framer@claude-design-skillstack": true,
@@ -25,17 +37,5 @@
         "repo": "mattpocock/skills"
       }
     }
-  },
-  "permissions": {
-    "deny": [
-      "Read(./.env)",
-      "Read(./.env.*)",
-      "Bash(cat *.env*)",
-      "Bash(head *.env*)",
-      "Bash(tail *.env*)",
-      "Bash(less *.env*)",
-      "Bash(sed *.env*)",
-      "Bash(awk *.env*)"
-    ]
   }
 }

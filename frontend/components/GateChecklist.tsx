@@ -11,7 +11,7 @@ export function GateChecklist({ decision }: { decision: Decision }) {
             key={rule.label}
             className="flex gap-2 rounded px-2 py-1 text-xs"
             style={{
-              background: active ? "var(--pending-dim)" : "transparent",
+              background: active ? "color-mix(in srgb, var(--pending) 16%, transparent)" : "transparent",
               color: active ? "var(--pending)" : "var(--ink-dim)",
             }}
           >
