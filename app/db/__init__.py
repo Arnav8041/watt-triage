@@ -131,6 +131,35 @@ def rollup_old_readings(pool, retention_hours):
     return len(summaries), sum(count for (count,) in summaries)
 
 
+def list_decisions(pool, outcome, limit):
+    """Decisions newest-first, with a still-pending Candidate shown as outcome 'pending'.
+
+    `id` is the Decision's id, null for a pending Candidate (it has none yet). A pending
+    Candidate sorts by when it was detected, since it has no decided_at yet.
+    """
+    limit = max(1, min(limit, 100))
+    with pool.connection() as conn:
+        # The two UNION ALL branches must list the same columns in the same order;
+        # add a column to one and you must add it to the other, or values shift silently.
+        return conn.cursor(row_factory=dict_row).execute(
+            "SELECT id, candidate_id, appliance_id, watts, trigger, outcome, confidence, "
+            "gate_reason, reasoning, evidence, tool_trace, "
+            "acknowledged_at::text AS acknowledged_at, detected_at::text AS detected_at, "
+            "decided_at::text AS decided_at FROM ("
+            "  SELECT d.id, d.candidate_id, c.appliance_id, c.watts, c.trigger, d.outcome, "
+            "  d.confidence, d.gate_reason, d.reasoning, d.evidence, d.tool_trace, "
+            "  d.acknowledged_at, c.detected_at, d.decided_at "
+            "  FROM triage_decision d JOIN anomaly_candidate c ON c.id = d.candidate_id "
+            "  UNION ALL "
+            "  SELECT NULL, c.id, c.appliance_id, c.watts, c.trigger, 'pending', "
+            "  NULL, NULL, NULL, NULL, NULL, NULL, c.detected_at, NULL "
+            "  FROM anomaly_candidate c WHERE c.status = 'pending'"
+            ") combined WHERE %s::text IS NULL OR combined.outcome = %s "
+            "ORDER BY COALESCE(combined.decided_at, combined.detected_at) DESC LIMIT %s",
+            (outcome, outcome, limit),
+        ).fetchall()
+
+
 def get_candidate(pool, candidate_id):
     """One Candidate as a dict, or None. detected_at is text so it fits in JSON."""
     with pool.connection() as conn:
@@ -149,6 +178,19 @@ def get_appliance(pool, appliance_id):
         ).fetchone()
 
 
+def list_appliances(pool):
+    """Every Appliance with its Rated Wattage and latest Reading (both null if it has none)."""
+    with pool.connection() as conn:
+        return conn.cursor(row_factory=dict_row).execute(
+            "SELECT a.id, a.name, a.location, a.rated_watts, "
+            "lr.watts AS latest_watts, lr.recorded_at::text AS latest_recorded_at "
+            "FROM appliance a LEFT JOIN LATERAL ("
+            "  SELECT watts, recorded_at FROM reading r WHERE r.appliance_id = a.id "
+            "  ORDER BY recorded_at DESC, id DESC LIMIT 1"
+            ") lr ON true ORDER BY a.id"
+        ).fetchall()
+
+
 def get_recent_readings(pool, appliance_id, minutes, around):
     """Readings up to `minutes` (max 60) either side of `around`, oldest first. Empty list if none.
 
@@ -163,6 +205,18 @@ def get_recent_readings(pool, appliance_id, minutes, around):
             "AND %s::timestamptz + make_interval(mins => %s) "
             "ORDER BY recorded_at, id",
             (appliance_id, around, minutes, around, minutes),
+        ).fetchall()
+
+
+def get_readings_since(pool, appliance_id, minutes):
+    """A recent trace for the dashboard: the last `minutes` (max a day) of Readings, oldest first."""
+    minutes = min(minutes, 24 * 60)
+    with pool.connection() as conn:
+        return conn.cursor(row_factory=dict_row).execute(
+            "SELECT watts, recorded_at::text AS recorded_at FROM reading "
+            "WHERE appliance_id = %s AND recorded_at > now() - make_interval(mins => %s) "
+            "ORDER BY recorded_at, id",
+            (appliance_id, minutes),
         ).fetchall()
 
 

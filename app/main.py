@@ -1,14 +1,22 @@
 import os
 from contextlib import asynccontextmanager
+from typing import Literal
 
 import anthropic
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
 from app import agent, db
+
+
+def cors_origins():
+    """Origins allowed to call this API, from CORS_ORIGINS (comma-separated). Empty if unset."""
+    raw = os.environ.get("CORS_ORIGINS", "")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 @asynccontextmanager
@@ -25,6 +33,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware, allow_origins=cors_origins(), allow_methods=["GET", "POST"], allow_headers=["*"]
+)
 
 
 @app.exception_handler(RequestValidationError)
@@ -44,6 +55,18 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/appliances")
+def list_appliances(request: Request):
+    return db.list_appliances(request.app.state.pool)
+
+
+@app.get("/appliances/{appliance_id}/readings")
+def appliance_readings(appliance_id: str, request: Request, minutes: int = Query(30, ge=1)):
+    if db.get_appliance(request.app.state.pool, appliance_id) is None:
+        raise HTTPException(404, f"Unknown appliance '{appliance_id}'")
+    return db.get_readings_since(request.app.state.pool, appliance_id, minutes)
+
+
 @app.post("/readings", status_code=202)
 def post_reading(reading: ReadingIn, request: Request, background_tasks: BackgroundTasks):
     stored = db.insert_reading(request.app.state.pool, reading.appliance_id, reading.watts)
@@ -53,6 +76,11 @@ def post_reading(reading: ReadingIn, request: Request, background_tasks: Backgro
     for candidate_id in candidate_ids:  # runs after the 202 has gone out
         background_tasks.add_task(agent.triage, request.app.state.pool, request.app.state.client, candidate_id)
     return {"id": reading_id}
+
+
+@app.get("/decisions")
+def list_decisions(request: Request, outcome: Literal["escalated", "resolved", "pending"] | None = None, limit: int = 20):
+    return db.list_decisions(request.app.state.pool, outcome, limit)
 
 
 @app.post("/admin/rollup")
