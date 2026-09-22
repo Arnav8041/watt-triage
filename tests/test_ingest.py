@@ -145,7 +145,10 @@ def test_ingest_responds_without_waiting_for_the_model(monkeypatch):
 
         # If ingest waited for the frozen model, this would time out after 3 seconds.
         r = httpx2.post(
-            f"http://127.0.0.1:{port}/readings", json={"appliance_id": "space_heater", "watts": 3180}, timeout=3
+            f"http://127.0.0.1:{port}/readings",
+            json={"appliance_id": "space_heater", "watts": 3180},
+            headers={"X-API-Key": os.environ["WRITE_API_KEY"]},
+            timeout=3,
         )
 
         assert r.status_code == 202

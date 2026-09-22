@@ -1,10 +1,11 @@
+import hmac
 import os
 import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
 import anthropic
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -24,11 +25,28 @@ def cors_origins():
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
+def write_api_key():
+    return os.environ.get("WRITE_API_KEY")
+
+
+def require_write_key(x_api_key: str | None = Header(default=None)):
+    """Guards a write endpoint (ADR-0006): every Candidate can cost a paid model call.
+
+    Deliberately not on /admin/fire or /admin/reset: those are demo controls the public
+    dashboard calls straight from the browser (frontend/components/FireControl.tsx), so a
+    key there would have to be visible to anyone anyway.
+    """
+    if not x_api_key or not hmac.compare_digest(x_api_key, write_api_key() or ""):
+        raise HTTPException(401, "Missing or invalid API key")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not set")
+    if not write_api_key():
+        raise RuntimeError("WRITE_API_KEY is not set")  # fail closed: never run with writes open (ADR-0006)
     with ConnectionPool(url, open=True) as pool:
         pool.wait()  # fail at startup if the database is down
         db.apply_schema(pool)
@@ -85,7 +103,7 @@ def _ingest_and_triage(request: Request, background_tasks: BackgroundTasks, appl
     return reading_id
 
 
-@app.post("/readings", status_code=202)
+@app.post("/readings", status_code=202, dependencies=[Depends(require_write_key)])
 def post_reading(reading: ReadingIn, request: Request, background_tasks: BackgroundTasks):
     reading_id = _ingest_and_triage(request, background_tasks, reading.appliance_id, reading.watts)
     if reading_id is None:
@@ -131,7 +149,7 @@ def reset_demo(request: Request):
     return {"status": "reset"}
 
 
-@app.post("/admin/rollup")
+@app.post("/admin/rollup", dependencies=[Depends(require_write_key)])
 def rollup(request: Request):
     # No scheduler in v1 (ADR-0006): call this by hand, or from cron.
     rows_written, deleted = db.rollup_old_readings(request.app.state.pool, db.configured_retention_hours())

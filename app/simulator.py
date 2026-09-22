@@ -84,7 +84,11 @@ def ambient(base_url, ticks=None, interval=AMBIENT_INTERVAL_SECONDS):
 def _post(base_url, appliance_id, watts):
     import httpx2  # dev-only dependency; only the standalone CLI paths (fire, ambient) need it
 
-    response = httpx2.post(f"{base_url}/readings", json={"appliance_id": appliance_id, "watts": watts})
+    response = httpx2.post(
+        f"{base_url}/readings",
+        json={"appliance_id": appliance_id, "watts": watts},
+        headers={"X-API-Key": os.environ["WRITE_API_KEY"]},
+    )
     response.raise_for_status()
 
 
