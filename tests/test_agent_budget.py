@@ -1,3 +1,5 @@
+import threading
+
 from app import agent, db
 from app.agent import triage
 from app.main import app
@@ -87,10 +89,10 @@ def test_the_count_is_read_from_the_database_not_in_process_state(client, monkey
     assert db.agent_runs_this_hour(app.state.pool) == 3
 
 
-def test_decisions_older_than_an_hour_do_not_count_toward_the_budget(client):
+def test_runs_older_than_an_hour_do_not_count_toward_the_budget(client):
     plant_agent_runs(1)
     with app.state.pool.connection() as conn:
-        conn.execute("UPDATE triage_decision SET decided_at = now() - interval '2 hours'")
+        conn.execute("UPDATE agent_run SET ran_at = now() - interval '2 hours'")
 
     assert db.agent_runs_this_hour(app.state.pool) == 0
 
@@ -98,3 +100,33 @@ def test_decisions_older_than_an_hour_do_not_count_toward_the_budget(client):
 def test_default_budget_has_a_sensible_positive_default(monkeypatch):
     monkeypatch.delenv("AGENT_MAX_RUNS_PER_HOUR", raising=False)
     assert agent.hourly_budget() > 0
+
+
+# The race this closes: without an atomic check-and-reserve, many candidates triaged at once
+# could all read the same "under budget" count before any of them finishes (the model call
+# takes seconds), letting far more real calls through than the configured cap.
+
+def test_a_reservation_is_recorded_immediately_not_only_once_a_decision_is_written(client):
+    assert db.reserve_agent_run(app.state.pool, budget=1) is True
+    assert db.agent_runs_this_hour(app.state.pool) == 1  # counted already, no Triage Decision exists yet
+    assert db.reserve_agent_run(app.state.pool, budget=1) is False  # the one slot is already taken
+
+
+def test_concurrent_reservations_never_exceed_the_budget(client):
+    budget = 5
+    granted = []
+    lock = threading.Lock()
+
+    def attempt():
+        ok = db.reserve_agent_run(app.state.pool, budget)
+        with lock:
+            granted.append(ok)
+
+    threads = [threading.Thread(target=attempt) for _ in range(25)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert granted.count(True) == budget  # never more than the budget, even under real concurrency
+    assert db.agent_runs_this_hour(app.state.pool) == budget

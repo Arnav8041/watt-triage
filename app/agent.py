@@ -198,7 +198,7 @@ def triage(pool, client, candidate_id):
     budget = hourly_budget()
     model_used = None  # stays None unless we actually reach a real model call
     try:
-        if db.agent_runs_this_hour(pool) >= budget:
+        if not db.reserve_agent_run(pool, budget):
             raise AgentFailure(f"budget of {budget} runs/hour reached")
         model_used = model()
         if candidate["trigger"] == "rated_breach":

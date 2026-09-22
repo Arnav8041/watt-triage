@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS triage_decision (
     decided_at      timestamptz NOT NULL DEFAULT now()
 );
 
+-- One row per real model call attempted (ticket #16's hourly budget). Written atomically with
+-- the budget check itself (pg_advisory_xact_lock in app/db/__init__.py:reserve_agent_run), so
+-- concurrent triage() runs can't all read the same stale count before any of them is recorded.
+CREATE TABLE IF NOT EXISTS agent_run (
+    id     bigserial PRIMARY KEY,
+    ran_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS rollup (
     appliance_id text NOT NULL REFERENCES appliance (id),
     hour         timestamptz NOT NULL,

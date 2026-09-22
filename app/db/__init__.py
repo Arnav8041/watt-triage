@@ -80,7 +80,13 @@ def _raise_statistical_candidate(conn, appliance_id):
 
 
 def reset(pool):
-    """Wipe Readings, Candidates and Decisions for the simulator. Appliances are left alone."""
+    """Wipe Readings, Candidates and Decisions for the simulator. Appliances are left alone.
+
+    Deliberately does not touch agent_run: this backs the public, unauthenticated
+    /admin/reset endpoint, so clearing the hourly budget here would let anyone reset their
+    own spend cap on demand — an easier bypass than the redeploy ticket #16 already guards
+    against.
+    """
     with pool.connection() as conn:
         conn.execute("TRUNCATE reading, anomaly_candidate, rollup CASCADE")  # cascades to triage_decision
 
@@ -277,15 +283,33 @@ def acknowledge_decision(pool, decision_id):
         ).fetchone()
 
 
-def agent_runs_this_hour(pool):
-    """Real model calls made in the last hour (ticket #16's budget cap). A budget-skipped
-    decision has model = NULL, so it never counts toward its own cap. Reads straight from
-    triage_decision, so the count survives an app restart without any in-memory state.
+def reserve_agent_run(pool, budget):
+    """Atomically checks the hourly cap and, if there's room, records a real model call about
+    to be attempted (ticket #16). Returns True (go ahead) or False (over budget, don't call it).
+
+    The check and the write happen under one advisory lock so two candidates triaged at once
+    can't both read the same stale count before either of them is recorded — without the lock,
+    the model call itself takes seconds, which is more than enough time for many concurrent
+    triage() runs to all slip through the same gap.
     """
     with pool.connection() as conn:
-        return conn.execute(  # the window itself isn't configurable, only the count (hourly_budget()), so it's literal
-            "SELECT count(*) FROM triage_decision "
-            "WHERE model IS NOT NULL AND decided_at > now() - interval '1 hour'"
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('agent_run_budget'))")
+        count = conn.execute(  # the window itself isn't configurable, only the count (hourly_budget()), so it's literal
+            "SELECT count(*) FROM agent_run WHERE ran_at > now() - interval '1 hour'"
+        ).fetchone()[0]
+        if count >= budget:
+            return False
+        conn.execute("INSERT INTO agent_run DEFAULT VALUES")
+        return True
+
+
+def agent_runs_this_hour(pool):
+    """Real model calls attempted in the last hour, for visibility (ticket #16). Reads straight
+    from agent_run, so the count survives an app restart without any in-memory state.
+    """
+    with pool.connection() as conn:
+        return conn.execute(
+            "SELECT count(*) FROM agent_run WHERE ran_at > now() - interval '1 hour'"
         ).fetchone()[0]
 
 
