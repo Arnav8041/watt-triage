@@ -160,6 +160,22 @@ def get_recent_readings(pool, appliance_id, minutes, around):
         ).fetchall()
 
 
+def get_hourly_history(pool, appliance_id, hours, around):
+    """Rollup rows for the `hours` (max 168) up to `around`, oldest first. Empty list if none.
+
+    Pass the Candidate's detected_at as `around`, same as get_recent_readings.
+    """
+    hours = min(hours, 168)  # the model chooses this, so cap it at a week
+    with pool.connection() as conn:
+        return conn.cursor(row_factory=dict_row).execute(
+            "SELECT hour::text AS hour, min_watts, max_watts, avg_watts, sample_count FROM rollup "
+            "WHERE appliance_id = %s "
+            "AND hour BETWEEN %s::timestamptz - make_interval(hours => %s) AND %s::timestamptz "
+            "ORDER BY hour",
+            (appliance_id, around, hours, around),
+        ).fetchall()
+
+
 def get_recent_decisions(pool, appliance_id, limit):
     """The last few (max 10) Triage Decisions for an Appliance, newest first."""
     limit = max(1, min(limit, 10))  # model-chosen too, and Postgres errors on a negative LIMIT

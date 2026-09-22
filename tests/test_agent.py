@@ -284,7 +284,8 @@ def test_the_agent_is_offered_exactly_the_read_only_tools_and_the_terminal_one(c
 
     offered = {tool["name"] for tool in fake.calls[0]["tools"]}
     assert offered == {
-        "get_appliance_profile", "get_recent_readings", "get_recent_decisions", "submit_triage_decision"
+        "get_appliance_profile", "get_recent_readings", "get_hourly_history", "get_recent_decisions",
+        "submit_triage_decision",
     }
 
 
@@ -293,7 +294,9 @@ def test_no_decisions_or_a_nonsense_limit_gives_an_empty_result_not_an_error(cli
     assert db.get_recent_decisions(app.state.pool, "space_heater", -1) == []
 
 
-@pytest.mark.parametrize("tool, arg", [("get_recent_readings", {"minutes": 10}), ("get_recent_decisions", {"limit": 5})])
+@pytest.mark.parametrize("tool, arg", [
+    ("get_recent_readings", {"minutes": 10}), ("get_hourly_history", {"hours": 24}), ("get_recent_decisions", {"limit": 5}),
+])
 def test_asking_about_an_unknown_appliance_gets_an_error_the_agent_can_read(client, tool, arg):
     cid = make_candidate()
     fake = ScriptedClient([tool_use(tool, appliance_id="toaster", **arg)], [submit("escalate", "unsure")])
@@ -346,3 +349,69 @@ def test_precedent_shows_when_the_gate_rather_than_the_agent_forced_the_outcome(
     (precedent,) = trace[0]["output"]
     assert precedent["trigger"] == "rated_breach"
     assert precedent["gate_reason"] == "rated breach: reading is above the appliance's rated wattage"
+
+
+def plant_rollups(*hours_ago):
+    """One Rollup row per entry, planted newest-first so the tool has to sort them. avg_watts = hours ago."""
+    with app.state.pool.connection() as conn:
+        for h in hours_ago:
+            conn.execute(
+                "INSERT INTO rollup (appliance_id, hour, min_watts, max_watts, avg_watts, sample_count) "
+                "VALUES ('space_heater', date_trunc('hour', now()) - make_interval(hours => %s), 1, 9, %s, 60)",
+                (h, h),
+            )
+
+
+def history_call(hours=48):
+    return [tool_use("get_hourly_history", appliance_id="space_heater", hours=hours)]
+
+
+def test_agent_can_look_at_hourly_history_oldest_first(client):
+    plant_rollups(2, 5, 30)
+    cid = make_candidate()
+    fake = ScriptedClient(history_call(hours=48), [submit("resolve_quietly", "certain")])
+
+    triage(app.state.pool, fake, cid)
+
+    _, trace = stored(cid)
+    assert [row["avg_watts"] for row in trace[0]["output"]] == [30, 5, 2]  # 30h ago is the oldest
+    assert decisions_for(cid)[0][0] == "resolved"  # and the agent completed its decision
+
+
+def test_hourly_history_only_covers_the_requested_span(client):
+    plant_rollups(2, 5, 30)
+    cid = make_candidate()
+
+    triage(app.state.pool, ScriptedClient(history_call(hours=6), [submit("escalate", "unsure")]), cid)
+
+    _, trace = stored(cid)
+    assert [row["avg_watts"] for row in trace[0]["output"]] == [5, 2]
+
+
+def test_a_span_with_no_rollups_gives_an_empty_result_not_an_error(client):
+    cid = make_candidate()
+
+    triage(app.state.pool, ScriptedClient(history_call(), [submit("resolve_quietly", "certain")]), cid)
+
+    _, trace = stored(cid)
+    assert trace[0]["output"] == []
+    assert decisions_for(cid)[0][0] == "resolved"
+
+
+def test_evidence_snapshots_the_hourly_history(client):
+    plant_rollups(3)
+    cid = make_candidate()
+
+    triage(app.state.pool, ScriptedClient(history_call(), [submit("resolve_quietly", "certain")]), cid)
+
+    evidence, _ = stored(cid)
+    (seen,) = evidence["tool_results"]
+    assert seen["tool"] == "get_hourly_history"
+    assert [(row["min_watts"], row["max_watts"], row["sample_count"]) for row in seen["output"]] == [(1, 9, 60)]
+
+
+def test_a_huge_or_nonsense_span_is_capped_and_never_errors(client):
+    plant_rollups(2, 200)  # 200 hours ago is past the one-week cap
+
+    assert [r["avg_watts"] for r in db.get_hourly_history(app.state.pool, "space_heater", 1_000_000, datetime.now(timezone.utc))] == [2]
+    assert db.get_hourly_history(app.state.pool, "space_heater", -5, datetime.now(timezone.utc)) == []

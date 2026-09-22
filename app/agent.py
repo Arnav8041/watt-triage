@@ -15,7 +15,8 @@ from app import db, gate
 SYSTEM = (
     "You triage one suspicious power reading in a home. Use get_appliance_profile to find out what "
     "the appliance is and its rated wattage. If it would help, use get_recent_readings to see the shape "
-    "of the trace around the reading, and get_recent_decisions to see what was concluded last time. "
+    "of the trace around the reading, get_hourly_history to see whether this draw is normal for this time "
+    "of day, and get_recent_decisions to see what was concluded last time. "
     "Only look up what you need. Then call submit_triage_decision exactly once. "
     "Write the reasoning in plain language for the homeowner. Say 'certain' only if the reading is "
     "clearly harmless; if you are at all unsure, say 'unsure' and escalate."
@@ -67,6 +68,19 @@ TOOLS = [
         },
     },
     {
+        "name": "get_hourly_history",
+        "description": "Hourly summaries (min, max, average watts and reading count) for the appliance over "
+        "the last N hours before the flagged reading (at most 168), oldest first. Use it to judge whether "
+        "this draw is normal for this time of day. Empty if nothing has been summarised yet.",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {"appliance_id": {"type": "string"}, "hours": {"type": "integer"}},
+            "required": ["appliance_id", "hours"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "get_recent_decisions",
         "description": "What was concluded the last few times this appliance was triaged (at most 10), "
         "newest first. outcome is 'escalated' or 'resolved' (closed quietly, same as resolve_quietly). "
@@ -102,7 +116,7 @@ def max_turns():
 
 
 def run_tool(pool, name, args, detected_at):
-    if name not in ("get_appliance_profile", "get_recent_readings", "get_recent_decisions"):
+    if name not in ("get_appliance_profile", "get_recent_readings", "get_hourly_history", "get_recent_decisions"):
         return {"error": f"unknown tool {name}"}
     appliance = db.get_appliance(pool, args["appliance_id"])
     if appliance is None:  # a typo'd id must not look like "no history"
@@ -111,6 +125,8 @@ def run_tool(pool, name, args, detected_at):
         return appliance
     if name == "get_recent_readings":
         return db.get_recent_readings(pool, appliance["id"], args["minutes"], detected_at)
+    if name == "get_hourly_history":
+        return db.get_hourly_history(pool, appliance["id"], args["hours"], detected_at)
     return db.get_recent_decisions(pool, appliance["id"], args["limit"])
 
 
