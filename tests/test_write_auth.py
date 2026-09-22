@@ -1,4 +1,4 @@
-import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,21 +17,32 @@ def _reading_count():
         return conn.execute("SELECT count(*) FROM reading").fetchone()[0]
 
 
+def _plant_old_reading():
+    """A Reading old enough that /admin/rollup would summarise and delete it, if it ran."""
+    with app.state.pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO reading (appliance_id, watts, recorded_at) VALUES ('fridge', 100, %s)",
+            (datetime.now(timezone.utc) - timedelta(hours=48),),
+        )
+
+
 @pytest.mark.parametrize("path", WRITE_ENDPOINTS)
 def test_missing_key_is_rejected_and_nothing_is_stored(client, path):
+    _plant_old_reading()  # old enough for /admin/rollup to delete it, if it ran
+    before = _reading_count()
     with TestClient(app) as anon:  # a second startup with no default header
         r = anon.post(path, json=_body(path))
         assert r.status_code == 401
-        if path == "/readings":
-            assert _reading_count() == 0
+        assert _reading_count() == before  # neither a new Reading nor a rollup deletion happened
 
 
 @pytest.mark.parametrize("path", WRITE_ENDPOINTS)
 def test_wrong_key_is_rejected_and_nothing_is_stored(client, path):
+    _plant_old_reading()
+    before = _reading_count()
     r = client.post(path, json=_body(path), headers={"X-API-Key": "not-the-real-key"})
     assert r.status_code == 401
-    if path == "/readings":
-        assert _reading_count() == 0
+    assert _reading_count() == before
 
 
 @pytest.mark.parametrize("path", WRITE_ENDPOINTS)
