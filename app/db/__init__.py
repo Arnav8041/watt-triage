@@ -79,6 +79,12 @@ def _raise_statistical_candidate(conn, appliance_id):
         ).fetchone()[0]
 
 
+def reset(pool):
+    """Wipe Readings, Candidates and Decisions for the simulator. Appliances are left alone."""
+    with pool.connection() as conn:
+        conn.execute("TRUNCATE reading, anomaly_candidate, rollup CASCADE")  # cascades to triage_decision
+
+
 def seed_readings(pool, appliance_id, watts, interval_seconds=5):
     """Plant past readings for one Appliance. Oldest first, ending one interval ago. Skips the detector."""
     now = datetime.now(timezone.utc)
