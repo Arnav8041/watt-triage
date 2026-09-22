@@ -277,6 +277,18 @@ def acknowledge_decision(pool, decision_id):
         ).fetchone()
 
 
+def agent_runs_this_hour(pool):
+    """Real model calls made in the last hour (ticket #16's budget cap). A budget-skipped
+    decision has model = NULL, so it never counts toward its own cap. Reads straight from
+    triage_decision, so the count survives an app restart without any in-memory state.
+    """
+    with pool.connection() as conn:
+        return conn.execute(  # the window itself isn't configurable, only the count (hourly_budget()), so it's literal
+            "SELECT count(*) FROM triage_decision "
+            "WHERE model IS NOT NULL AND decided_at > now() - interval '1 hour'"
+        ).fetchone()[0]
+
+
 def insert_decision(pool, candidate_id, outcome, confidence, gate_reason, reasoning, evidence, tool_trace, model, latency_ms):
     """Save the Triage Decision and mark the Candidate decided, in one transaction."""
     with pool.connection() as conn:

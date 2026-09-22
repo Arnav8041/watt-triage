@@ -1,6 +1,7 @@
 """The triage agent: a hand-written tool-calling loop (ADR-0005). The gate makes the final call.
 
-Env vars: AGENT_MODEL (claude-haiku-4-5), AGENT_TIMEOUT_SECONDS (30), AGENT_MAX_TURNS (6).
+Env vars: AGENT_MODEL (claude-haiku-4-5), AGENT_TIMEOUT_SECONDS (30), AGENT_MAX_TURNS (6),
+AGENT_MAX_RUNS_PER_HOUR (100).
 """
 import json
 import os
@@ -115,6 +116,12 @@ def max_turns():
     return int(os.environ.get("AGENT_MAX_TURNS", 6))  # model replies before giving up
 
 
+def hourly_budget():
+    # ceiling on paid model calls per hour (ticket #16): comfortably above normal demo
+    # traffic, but a real backstop against a leaked key or a runaway simulator loop
+    return int(os.environ.get("AGENT_MAX_RUNS_PER_HOUR", 100))
+
+
 def run_tool(pool, name, args, detected_at):
     if name not in ("get_appliance_profile", "get_recent_readings", "get_hourly_history", "get_recent_decisions"):
         return {"error": f"unknown tool {name}"}
@@ -188,13 +195,18 @@ def triage(pool, client, candidate_id):
     trace = []
     started = time.monotonic()
     recommendation = reasoning = failure = None
+    budget = hourly_budget()
+    model_used = None  # stays None unless we actually reach a real model call
     try:
+        if db.agent_runs_this_hour(pool) >= budget:
+            raise AgentFailure(f"budget of {budget} runs/hour reached")
+        model_used = model()
         if candidate["trigger"] == "rated_breach":
             reasoning = explain(client, pool, candidate, trace)
         else:
             recommendation = decide(client, pool, candidate, trace)
             reasoning = recommendation.reasoning
-    except Exception as error:  # any failure escalates (ADR-0005)
+    except Exception as error:  # any failure escalates (ADR-0005): a budget cap, the budget check itself, or the model
         failure = describe_failure(error)
 
     if failure and candidate["trigger"] != "rated_breach":
@@ -210,5 +222,5 @@ def triage(pool, client, candidate_id):
     # the Candidate plus what the tools returned, so it outlives the raw Readings (ADR-0004)
     evidence = {**candidate, "tool_results": [step for step in trace if "output" in step]}
     db.insert_decision(
-        pool, candidate_id, outcome, confidence, gate_reason, reasoning, evidence, trace, model(), latency_ms
+        pool, candidate_id, outcome, confidence, gate_reason, reasoning, evidence, trace, model_used, latency_ms
     )

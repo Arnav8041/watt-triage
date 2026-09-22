@@ -130,8 +130,9 @@ def fire_scenario(scenario: str, request: Request, background_tasks: BackgroundT
     now = time.monotonic()
     if now < request.app.state.fire_cooldown_until:
         raise HTTPException(409, "Already investigating — try again in a moment.")
-    # ponytail: time-based only, doesn't track whether the triage actually finished;
-    # a real spend cap (#16) is the intended replacement, this is just a stopgap.
+    # ponytail: time-based only, doesn't track whether the triage actually finished. Complements,
+    # not replaces, the hourly agent budget (#16): this just stops one visitor mashing the button;
+    # the budget is the real ceiling on paid model calls across every Candidate.
     request.app.state.fire_cooldown_until = now + fire_cooldown_seconds()
     for appliance_id, watts in simulator.fire_readings(scenario):
         _ingest_and_triage(request, background_tasks, appliance_id, watts)  # a fixed scenario table is always known
