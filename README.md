@@ -1,6 +1,8 @@
 # WattTriage
 
-**Live demo:** _add the deployed URL here once it's up — see [Deploying](#deploying) below._
+**Live demo:** [watttriage.vercel.app](https://watttriage.vercel.app) — API at
+[watt-triage-api.onrender.com](https://watt-triage-api.onrender.com) (backend may take a
+few seconds to wake up on the first request; see [Deploying](#deploying) below).
 
 WattTriage watches electrical power draw from five monitored home appliances and decides,
 per suspicious reading, whether it can be closed quietly or must be put in front of the
