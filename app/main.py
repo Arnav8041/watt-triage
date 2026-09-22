@@ -79,7 +79,11 @@ def post_reading(reading: ReadingIn, request: Request, background_tasks: Backgro
 
 
 @app.get("/decisions")
-def list_decisions(request: Request, outcome: Literal["escalated", "resolved", "pending"] | None = None, limit: int = 20):
+def list_decisions(
+    request: Request,
+    outcome: Literal["escalated", "resolved", "pending"] | None = None,
+    limit: int = 20,
+):
     return db.list_decisions(request.app.state.pool, outcome, limit)
 
 

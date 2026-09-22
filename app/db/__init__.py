@@ -139,8 +139,7 @@ def list_decisions(pool, outcome, limit):
     """
     limit = max(1, min(limit, 100))
     with pool.connection() as conn:
-        # The two UNION ALL branches must list the same columns in the same order;
-        # add a column to one and you must add it to the other, or values shift silently.
+        # keep both UNION ALL branches in the same column order, or values shift silently
         return conn.cursor(row_factory=dict_row).execute(
             "SELECT id, candidate_id, appliance_id, watts, trigger, outcome, confidence, "
             "gate_reason, reasoning, evidence, tool_trace, "

@@ -148,8 +148,7 @@ def test_cors_origins_reads_a_comma_separated_list(monkeypatch):
 
 
 def test_an_unconfigured_origin_is_not_allowed_by_default(client):
-    # CORS_ORIGINS is unset in the test environment, so the real middleware, not just
-    # cors_origins() in isolation, must deny every origin rather than allow everything.
+    # no CORS_ORIGINS set in tests, so the real middleware should deny every origin
     r = client.get("/appliances", headers={"Origin": "https://anything.example"})
 
     assert "access-control-allow-origin" not in r.headers
