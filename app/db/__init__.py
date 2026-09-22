@@ -92,6 +92,39 @@ def seed_readings(pool, appliance_id, watts, interval_seconds=5):
         )
 
 
+def configured_retention_hours():
+    """Hours of raw Readings to keep, from RETENTION_HOURS."""
+    hours = float(os.environ.get("RETENTION_HOURS", 24))
+    if not 0 <= hours < float("inf"):  # a negative value would delete the current hour; nan fails this too
+        raise ValueError("RETENTION_HOURS must be 0 or more")
+    return hours
+
+
+def rollup_old_readings(pool, retention_hours):
+    """Turn old Readings into hourly Rollup rows and delete them. Returns (rows written, Readings deleted).
+
+    One statement, so it's all or nothing, and the DELETE feeds the summary, so nothing is deleted uncounted.
+    Decisions keep their own evidence (ADR-0004), so the DELETE needs no exceptions.
+    """
+    with pool.connection() as conn:
+        summaries = conn.execute(
+            # Cutoff rounds down to a whole UTC hour, so only full hours get summarised.
+            "WITH old AS ("
+            "  DELETE FROM reading WHERE recorded_at < date_trunc('hour', now() - %s * interval '1 hour', 'UTC') "
+            "  RETURNING appliance_id, watts, recorded_at"
+            ") "
+            "INSERT INTO rollup (appliance_id, hour, min_watts, max_watts, avg_watts, sample_count) "
+            "SELECT appliance_id, date_trunc('hour', recorded_at, 'UTC'), min(watts), max(watts), avg(watts), count(*) "
+            "FROM old GROUP BY appliance_id, date_trunc('hour', recorded_at, 'UTC') "
+            # ponytail: overwrites, so a late Reading for a summarised hour would replace its numbers. Merge counts then.
+            "ON CONFLICT (appliance_id, hour) DO UPDATE SET min_watts = EXCLUDED.min_watts, "
+            "max_watts = EXCLUDED.max_watts, avg_watts = EXCLUDED.avg_watts, sample_count = EXCLUDED.sample_count "
+            "RETURNING sample_count",
+            (retention_hours,),
+        ).fetchall()
+    return len(summaries), sum(count for (count,) in summaries)
+
+
 def get_candidate(pool, candidate_id):
     """One Candidate as a dict, or None. detected_at is text so it fits in JSON."""
     with pool.connection() as conn:

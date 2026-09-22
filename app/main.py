@@ -55,6 +55,13 @@ def post_reading(reading: ReadingIn, request: Request, background_tasks: Backgro
     return {"id": reading_id}
 
 
+@app.post("/admin/rollup")
+def rollup(request: Request):
+    # No scheduler in v1 (ADR-0006): call this by hand, or from cron.
+    rows_written, deleted = db.rollup_old_readings(request.app.state.pool, db.configured_retention_hours())
+    return {"rollup_rows": rows_written, "readings_deleted": deleted}
+
+
 @app.post("/decisions/{decision_id}/acknowledge")
 def acknowledge(decision_id: int, request: Request):
     found = db.acknowledge_decision(request.app.state.pool, decision_id)
