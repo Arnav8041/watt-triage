@@ -1,4 +1,5 @@
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -10,7 +11,11 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, Field
 
-from app import agent, db
+from app import agent, db, simulator
+
+
+def fire_cooldown_seconds():
+    return float(os.environ.get("FIRE_COOLDOWN_SECONDS", 10))  # keeps a demo crowd from spamming paid model calls
 
 
 def cors_origins():
@@ -29,6 +34,7 @@ async def lifespan(app: FastAPI):
         db.apply_schema(pool)
         app.state.pool = pool
         app.state.client = anthropic.Anthropic(max_retries=0)  # no retries: a slow model escalates instead
+        app.state.fire_cooldown_until = 0.0
         yield
 
 
@@ -67,14 +73,23 @@ def appliance_readings(appliance_id: str, request: Request, minutes: int = Query
     return db.get_readings_since(request.app.state.pool, appliance_id, minutes)
 
 
+def _ingest_and_triage(request: Request, background_tasks: BackgroundTasks, appliance_id, watts):
+    """Store a Reading and queue triage for any Candidate it raises. Returns the reading id, or
+    None for an unknown appliance."""
+    stored = db.insert_reading(request.app.state.pool, appliance_id, watts)
+    if stored is None:
+        return None
+    reading_id, candidate_ids = stored
+    for candidate_id in candidate_ids:  # runs after the response has gone out
+        background_tasks.add_task(agent.triage, request.app.state.pool, request.app.state.client, candidate_id)
+    return reading_id
+
+
 @app.post("/readings", status_code=202)
 def post_reading(reading: ReadingIn, request: Request, background_tasks: BackgroundTasks):
-    stored = db.insert_reading(request.app.state.pool, reading.appliance_id, reading.watts)
-    if stored is None:
+    reading_id = _ingest_and_triage(request, background_tasks, reading.appliance_id, reading.watts)
+    if reading_id is None:
         raise HTTPException(422, f"Unknown appliance '{reading.appliance_id}'")
-    reading_id, candidate_ids = stored
-    for candidate_id in candidate_ids:  # runs after the 202 has gone out
-        background_tasks.add_task(agent.triage, request.app.state.pool, request.app.state.client, candidate_id)
     return {"id": reading_id}
 
 
@@ -85,6 +100,24 @@ def list_decisions(
     limit: int = 20,
 ):
     return db.list_decisions(request.app.state.pool, outcome, limit)
+
+
+@app.post("/admin/fire/{scenario}", status_code=202)
+def fire_scenario(scenario: str, request: Request, background_tasks: BackgroundTasks):
+    """Demo control (not a general write API): inject one of the simulator's three fixed
+    scenarios so a career-fair visitor can watch the agent investigate something they caused.
+    """
+    if scenario not in simulator.SCENARIOS:
+        raise HTTPException(404, f"Unknown scenario '{scenario}'")
+    now = time.monotonic()
+    if now < request.app.state.fire_cooldown_until:
+        raise HTTPException(409, "Already investigating — try again in a moment.")
+    # ponytail: time-based only, doesn't track whether the triage actually finished;
+    # a real spend cap (#16) is the intended replacement, this is just a stopgap.
+    request.app.state.fire_cooldown_until = now + fire_cooldown_seconds()
+    for appliance_id, watts in simulator.fire_readings(scenario):
+        _ingest_and_triage(request, background_tasks, appliance_id, watts)  # a fixed scenario table is always known
+    return {"scenario": scenario}
 
 
 @app.post("/admin/rollup")

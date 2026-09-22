@@ -8,7 +8,6 @@ import os
 import random
 import time
 
-import httpx2
 from psycopg_pool import ConnectionPool
 
 from app import db, detector
@@ -83,6 +82,8 @@ def ambient(base_url, ticks=None, interval=AMBIENT_INTERVAL_SECONDS):
 
 
 def _post(base_url, appliance_id, watts):
+    import httpx2  # dev-only dependency; only the standalone CLI paths (fire, ambient) need it
+
     response = httpx2.post(f"{base_url}/readings", json={"appliance_id": appliance_id, "watts": watts})
     response.raise_for_status()
 

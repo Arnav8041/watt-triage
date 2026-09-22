@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+/*
+  Palette: a utility control panel, not a SaaS dashboard. Amber and teal are the two
+  colors real breaker panels and gauges already use for "near the limit" and "safe" —
+  borrowed on purpose, not invented.
+*/
+:root {
+  --bg: #0f1417;
+  --surface: #171d21;
+  --surface-raised: #1d2429;
+  --line: #2a3238;
+  --ink: #e8edee;
+  --ink-dim: #8b979c;
+  --danger: #e8a33d;
+  --danger-dim: #6b5326;
+  --warn: #d9c44a;
+  --warn-dim: #565023;
+  --safe: #4fa381;
+  --safe-dim: #294538;
+  --pending: #6e8fb5;
+  --pending-dim: #2d3a48;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-danger: var(--danger);
+  --color-danger-dim: var(--danger-dim);
+  --color-warn: var(--warn);
+  --color-warn-dim: var(--warn-dim);
+  --color-safe: var(--safe);
+  --color-safe-dim: var(--safe-dim);
+  --color-pending: var(--pending);
+  --color-pending-dim: var(--pending-dim);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+/* readouts are measured, not written — mono says so without a label */
+.tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
